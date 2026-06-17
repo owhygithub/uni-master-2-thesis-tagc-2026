@@ -4,14 +4,14 @@ Hyperparameter tuning for the rank_mag TAGC (Optuna TPE).
 
 Tunes the model/optimizer hyperparameters that matter most, on the 30-day
 horizon (where cross-sectional signal is strongest). The objective is the best
-SMOOTHED VALIDATION Rank-IC (`best_rank_ic_so_far` in metrics.csv) — we tune on
+SMOOTHED VALIDATION Rank-IC (`best_rank_ic_so_far` in metrics.csv). we tune on
 VAL only, never on the test split.
 
 Key design choices for a CPU-feasible, honest search:
   * data loaders are built ONCE and reused across trials (the architecture HPs
     don't change the data), via a cache shim on build_loaders.
-  * reduced per-trial budget (small last_n_days, few epochs) — enough to rank
-    configs, validated afterwards with a full run.
+  * reduced per-trial budget (small last_n_days, few epochs), enough to rank
+    configs, then validated afterwards with a full run.
   * search includes the over-smoothing levers the AE/M3 audit flagged:
     n_layers_gat and topk.
 
@@ -49,6 +49,7 @@ def say(m):
 _orig_build = D.build_loaders
 _CACHE = {}
 def cached_build_loaders(cfg):
+    # KNOW the key must list every data-affecting field, miss one and trials share stale loaders
     key = (cfg.target_horizon, cfg.last_n_days, cfg.feature_set, cfg.cross_sectional_target,
            cfg.target_ticker)
     if key not in _CACHE:
@@ -58,6 +59,7 @@ def cached_build_loaders(cfg):
     cfg.n_stocks, cfg.n_macro, cfg.target_idx = ns, nm, ti
     return loaders
 T.build_loaders = cached_build_loaders                    # patch the name train.py uses
+# FIX monkeypatching train.build_loaders is fragile, breaks if train.py renames it
 
 def base_cfg():
     c = Config(feature_set="final", target_horizon=HORIZON)
@@ -85,6 +87,7 @@ def objective(trial: optuna.Trial) -> float:
     logging.basicConfig(level=logging.INFO, format="%(message)s",
                         handlers=[logging.FileHandler(out / "train.log", mode="w")], force=True)
     try:
+        # KNOW same seed every trial, so differences come from the HPs not RNG noise
         torch.manual_seed(0); np.random.seed(0)
         T.train(c, out_dir=out, resume=False)
         m = pd.read_csv(out / "metrics.csv")

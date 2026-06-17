@@ -1,14 +1,14 @@
-"""Entry point — train TAGC v2 end-to-end on the prepared parquet dataset.
+"""Entry point. train TAGC v5 end-to-end on the prepared parquet dataset.
 
-v2 supervises with MSE on the next-day return instead of BCE on the next-day
-direction. All scaffolding (TBPTT chunks, warmup+cosine LR, per-module LR
+v5 supervises with MSE on the next-day return instead of BCE on the next-day
+direction. All the scaffolding (TBPTT chunks, warmup+cosine LR, per-module LR
 scaling, per-module grad-norm logging, atomic checkpoints, SIGTERM-safe) is
 identical to v1.
 
 Usage:
-    python run_tagc_v2.py                                  # 20 epochs, 2y, target=AAPL
-    python run_tagc_v2.py --fresh                          # wipe out_dir and retrain
-    python run_tagc_v2.py --last-n-days 0 --out-dir runs/v2_full10y
+    python run_tagc_v5.py                                  # 20 epochs, 2y, target=AAPL
+    python run_tagc_v5.py --fresh                          # wipe out_dir and retrain
+    python run_tagc_v5.py --last-n-days 0 --out-dir runs/v2_full10y
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def main() -> None:
     p.add_argument("--stock-id-in-residual", default=None, choices=["true", "false"],
                    help="route the per-stock ID embedding into the head's residual "
                         "path (default true). Set false to remove the per-stock "
-                        "constant shortcut — the anti mean-collapse diagnostic.")
+                        "constant shortcut, the anti mean-collapse diagnostic.")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -111,6 +111,7 @@ def main() -> None:
 
     # v3.4: feature_set + horizon route to one of 6 parquets.
     # --feature-set and --horizon override use_news/horizon defaults.
+    # KNOW the 6-parquet routing only holds for the legacy builds, 'final' is separate
     cfg_kwargs = dict(use_news=args.use_news)
     if args.feature_set is not None:
         cfg_kwargs['feature_set'] = args.feature_set
@@ -121,13 +122,14 @@ def main() -> None:
         cfg.stocks_parquet = Path(args.stocks_parquet)
     # Only override the macro parquet when the user explicitly passed one, OR for
     # the legacy datasets. For feature_set='final', Config.__post_init__ already
-    # points macro at data/final_data/macro.parquet — don't clobber it with the
+    # points macro at data/final_data/macro.parquet, so don't clobber it with the
     # old default (whose columns wouldn't match the final macro schema).
     if args.macro_parquet != "data/macro_signals.parquet" or cfg.feature_set != "final":
         cfg.macro_parquet = Path(args.macro_parquet)
     if args.epochs is not None:
         # User-supplied --epochs forces a fixed N-epoch run (overrides the
         # min/max/patience defaults). Convenient for quick smoke tests.
+        # KNOW this disables early stopping entirely, so don't use it for real runs
         cfg.min_epochs = args.epochs
         cfg.max_epochs = args.epochs
         cfg.patience = max(1, args.epochs)   # effectively disable early stop
@@ -146,12 +148,12 @@ def main() -> None:
             # Static-graph needs the pre-built sector adjacency.
             cfg.static_graph_path = REPO / "data" / "sectors_static.parquet"
             if not cfg.static_graph_path.exists():
-                sys.exit(f"--variant static_graph: {cfg.static_graph_path} missing — "
+                sys.exit(f"--variant static_graph: {cfg.static_graph_path} missing, "
                          f"build it via data-preprocessing/build_sectors.ipynb")
 
     _set_determinism(cfg.seed, strict=args.deterministic)
     cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
-    log.info("v2 (regression)  device=%s  out_dir=%s  stocks=%s  macro=%s  last_n_days=%s",
+    log.info("v5 (regression)  device=%s  out_dir=%s  stocks=%s  macro=%s  last_n_days=%s",
              cfg.device, out_dir, cfg.stocks_parquet, cfg.macro_parquet, cfg.last_n_days)
     if cfg.device == "cuda":
         log.info("gpu=%s (count=%d)", torch.cuda.get_device_name(0), torch.cuda.device_count())

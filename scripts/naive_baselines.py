@@ -1,6 +1,6 @@
 """Naive non-learned baselines for return prediction.
 
-These are the "floor" any real model must beat to be non-vacuous:
+These are the "floor" any real model has to beat to be non-vacuous:
 
   constant       predict 0 every day                       (no model, no params)
   climatology    predict the training-period mean return    (1 param per ticker)
@@ -8,11 +8,11 @@ These are the "floor" any real model must beat to be non-vacuous:
   ar1            linear regression of ret[t] on ret[t-1]    (2 params per ticker)
   ridge_lag5     ridge on the prev-5-day returns            (5 params per ticker)
 
-Each baseline writes a `predictions_test.csv` in the same schema as TAGC's so
-the comparison tool downstream can treat them uniformly.
+Each baseline writes a `predictions_test.csv` in the same schema as TAGC's, so
+the comparison tool downstream can treat them all uniformly.
 
 Usage:
-    python scripts/naive_baselines.py AAPL                       # → runs/baseline_<kind>_aapl/
+    python scripts/naive_baselines.py AAPL                       # writes runs/baseline_<kind>_aapl/
     python scripts/naive_baselines.py AAPL --kind persistence    # one specific
     python scripts/naive_baselines.py AAPL --last-n-days 504     # match TAGC's window
     python scripts/naive_baselines.py AAPL --no-news             # use the no-news parquet
@@ -50,6 +50,7 @@ CSV_COLS = [
 def _load_target(cfg: Config, target: str):
     """Return (dates, ticker_returns_series) for the target ticker in cfg's
     canonical window, mirroring how model.data filters the panel."""
+    # KNOW we intersect on macro dates too so the window matches what TAGC sees
     df = pd.read_parquet(cfg.stocks_parquet)
     if df.index.names != ["date", "ticker"]:
         raise ValueError(f"unexpected index: {df.index.names}")
@@ -113,7 +114,7 @@ def _metrics(preds, actuals):
 # Baselines
 # ---------------------------------------------------------------------------
 def baseline_constant(cfg, target, value=0.0):
-    """Always predict `value`. Sanity-floor — beats nothing."""
+    """Always predict `value`. Sanity-floor, beats nothing."""
     dates, returns = _load_target(cfg, target)
     D = len(returns)
     train_end, val_end, total = _splits(D, cfg.train_frac, cfg.val_frac)
@@ -143,6 +144,7 @@ def baseline_persistence(cfg, target):
     D = len(returns)
     train_end, val_end, total = _splits(D, cfg.train_frac, cfg.val_frac)
     test_t = np.arange(val_end, total)
+    # KNOW test_t starts at val_end > 0 so returns[test_t - 1] never underflows
     preds   = returns[test_t - 1].astype(np.float32)
     actuals = returns[test_t]
     stds    = np.zeros_like(preds)
@@ -166,6 +168,7 @@ def baseline_ar1(cfg, target):
     preds   = (a + b * returns[test_t - 1]).astype(np.float32)
     actuals = returns[test_t]
     # Std: residual std on the training fit (homoscedastic AR(1)).
+    # KNOW this assumes constant variance, fine for a baseline but not realistic
     resid = y_tr - (a + b * x_tr)
     res_std = float(np.std(resid))
     stds = np.full_like(preds, res_std)

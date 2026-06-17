@@ -1,13 +1,13 @@
 """training loop + eval for TAGC.
 
-default loss is rank_mag (the v5 one) — two pieces, BOTH over the whole cross-section
+default loss is rank_mag (the v5 one), two pieces, BOTH over the whole cross-section
 each day, on the z-scored target:
 
     pred[N]   = head(embeds)                          # one score per stock
     rank_loss = ListMLE(pred[universe], y[universe])  # get the cross-sectional order right
     mag_loss  = Huber(pred[universe],  y[universe])   # anchor the scale so the levels aren't junk
     loss      = rank_weight*rank_loss + mag_weight*mag_loss + l1_edge_weight*mean(|A|)
-                                                      # defaults 0.6 / 0.4. no BCE — order implies sign.
+                                                      # defaults 0.6 / 0.4. no BCE, order implies sign.
 
     # KNOW the OLD loss was a point-Huber on ONE target ticker + an aux ranking term,
     # which basically let a constant prediction win. rank_mag is universe-wide so that
@@ -26,6 +26,7 @@ early stop: do NOT stop on val_mse, way too noisy. instead i use a smoothed
 (5-epoch rolling mean) val_rank_ic, on the EMA weights, and only after a burn-in.
 that combo makes "best at epoch 1" basically impossible, which was the whole
 point. see THESIS_LOG 12.11. # WORKING
+# TODO double-check the 5-epoch smoothing still helps now that runs use full history.
 
 best.pt = EMA weights from the best epoch. last.pt = live weights, only for
 resume. inference always reads best.pt.
@@ -60,7 +61,7 @@ _GRAD_GROUPS = ("macro_encoder", "stock_encoder", "graph", "gat", "head",
 
 
 # --------------------------------------------------------------------------
-# weight EMA — my fix for the "best is always epoch 1" mess
+# weight EMA, my fix for the "best is always epoch 1" mess
 # --------------------------------------------------------------------------
 class WeightEMA:
     """exp moving average of the params.
@@ -127,7 +128,7 @@ def _module_grad_norms(model: torch.nn.Module) -> dict:
 
 
 # --------------------------------------------------------------------------
-# ListMLE — listwise ranking loss for the cross-section
+# ListMLE, listwise ranking loss for the cross-section
 # --------------------------------------------------------------------------
 def listmle_loss(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """ListMLE: neg log-likelihood of the true ranking given my scores.
@@ -310,6 +311,7 @@ def evaluate(
     # with the score, its rank, the predicted direction, and the raw forward
     # return. that's exactly what scripts/backtest.py eats to build the
     # long-short book + full-history Rank-IC.
+    # FIX brittle if backtest.py ever renames a column, nothing here validates it.
     csv_writer = None
     csv_fh = None
     if predictions_csv is not None:
@@ -321,7 +323,7 @@ def evaluate(
             "pred_rank",         # percentile rank in [0,1], 1 = top
             "pred_direction",    # 1 = predicted up (above the cross-sectional median), 0 = down
             "true_fwd_return",   # the REAL raw H-day forward return for this (date, ticker)
-            "true_rank",         # the REAL return's percentile rank that day [0,1] — compare vs pred_rank
+            "true_rank",         # the REAL return's percentile rank that day [0,1], compare vs pred_rank
             "direction_correct", # 1 if pred_direction matched the real return (vs that day's median)
         ])
         if tickers is None:
@@ -501,7 +503,7 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
     log.info("target=%s (idx %d)  n_stocks=%d  n_macro=%d  train=%d  val=%d  test=%d",
              cfg.target_ticker.upper(), cfg.target_idx,
              cfg.n_stocks, cfg.n_macro, len(train_ds), len(val_ds), len(test_ds))
-    log.info("v3 regression: target=%s (FORWARD %d-day cumulative)  scale=%.1f",
+    log.info("v5 regression: target=%s (FORWARD %d-day cumulative)  scale=%.1f",
              cfg.regression_target_col, getattr(cfg, "target_horizon", 5),
              cfg.regression_scale)
 
@@ -550,6 +552,8 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
 
     # size the cosine schedule for max_epochs (longest possible run) so the LR
     # doesn't hit zero before the stopping criterion even fires.
+    # KNOW: if early-stop fires well before max_epochs the LR never fully decays,
+    # which is fine, the EMA weights are what we keep anyway.
     total_updates = max(1, (len(train_ds) // cfg.tbptt_steps) * cfg.max_epochs)
     warmup_steps = max(1, int(total_updates * cfg.warmup_frac))
 
@@ -683,7 +687,7 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
 
             loss = None
             if loss_kind == "rank_mag":
-                # v3.7 default. combined magnitude+ranking loss, both terms
+                # v5 default. combined magnitude+ranking loss, both terms
                 # universe-wide per day on the cross-sectional z-score target:
                 #     loss = rank_weight*ListMLE(universe) + mag_weight*Huber(universe)
                 # ListMLE (Xia et al. ICML 2008) gets the cross-sectional order;

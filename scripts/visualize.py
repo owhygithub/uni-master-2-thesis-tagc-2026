@@ -19,7 +19,7 @@ Outputs (PNG files, written to --out, default <run>/figures):
     6_strategy_pnl.png        cumulative simulated PnL of position_size × next-day return
     7_graph_network.png       target-centric network plot on 4 days (graph evolution)
     8_full_graph.png          spring-layout of the FULL universe (all 98 stocks)
-                              averaged across the test period; reveals clusters
+                              averaged across the test period, reveals clusters
 """
 from __future__ import annotations
 
@@ -142,15 +142,15 @@ def _alias_v2_to_v1(df: pd.DataFrame) -> pd.DataFrame:
     plot code. v2 columns: predicted_return, predicted_std, true_return,
     predicted_direction, true_direction, direction_correct. v1 had: p_mean,
     p_var, label, pred, correct. We alias the v2 columns under the v1 names
-    so downstream plots don't need to branch — keeping the v2 originals too."""
+    so downstream plots don't need to branch, and we keep the v2 originals too."""
     if "predicted_direction" in df.columns and "pred" not in df.columns:
         df = df.copy()
         df["pred"] = df["predicted_direction"]
         df["label"] = df["true_direction"]
         df["correct"] = df["direction_correct"]
         # NOTE: in v2 "p_mean" is the predicted RETURN (raw), not a probability.
-        # Plot code that assumes p_mean ∈ [0,1] will get larger / centered-at-0
-        # values; the y-axis labels still read "predicted return".
+        # Plot code that assumes p_mean in [0,1] will get larger, centered-at-0
+        # values, the y-axis labels still read "predicted return".
         df["p_mean"] = df["predicted_return"]
         df["p_var"] = df["predicted_std"] ** 2
         df.attrs["schema"] = "v2"
@@ -190,14 +190,14 @@ def plot_training_curves(metrics: pd.DataFrame, out: Path) -> None:
     """Per-epoch training/validation diagnostics.
 
     For v2 (regression) runs we show a 2×2 grid that surfaces the metric the
-    model is actually SELECTED on — the validation Rank-IC — which the old
+    model is actually SELECTED on, the validation Rank-IC, which the old
     2-panel layout hid entirely:
 
         [0,0] Loss          train_mse vs val_mse
         [0,1] Ranking loss  train_rank_loss vs val_rank_loss (ListMLE)
         [1,0] X-sec skill    val IC + val Rank-IC per epoch, with the running
                              best-Rank-IC (the early-stop selection metric) and
-                             a 0 chance line — the headline learning curve
+                             a 0 chance line, the headline learning curve
         [1,1] Direction acc  val_dir_acc + val RMSE (twin axis)
 
     v1 (legacy BCE) runs fall back to the original 2-panel loss+accuracy view.
@@ -245,7 +245,7 @@ def plot_training_curves(metrics: pd.DataFrame, out: Path) -> None:
     ax.set_xlabel("epoch"); ax.set_ylabel("ListMLE ranking loss")
     ax.set_title("(b) Cross-sectional ranking loss"); ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-    # (c) THE headline curve — validation IC + Rank-IC + running best
+    # (c) THE headline curve, validation IC + Rank-IC + running best
     ax = axes[1, 0]
     if "val_ic" in metrics:
         ax.plot(ep, metrics["val_ic"], "o-", label="val IC (Pearson)", color="#1f77b4", ms=3)
@@ -288,7 +288,7 @@ def plot_predictions_overview(preds: pd.DataFrame, target: str, out: Path) -> No
     gs = fig.add_gridspec(4, 2, height_ratios=[1.2, 1, 1, 1.4])
 
     # (a) prediction over time with true labels as colored dots.
-    # Schema-aware: v1 = probability in [0,1]; v2 = predicted RETURN (real number).
+    # Schema-aware: v1 = probability in [0,1], v2 = predicted RETURN (real number).
     is_v2 = preds.attrs.get("schema") == "v2"
     ax0 = fig.add_subplot(gs[0, :])
     y_lbl = "predicted return" if is_v2 else "p_mean"
@@ -450,9 +450,10 @@ def plot_graph_summary(graphs, target: str, out: Path) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
     axes[0, 0].plot(dates, eps, color="#1f77b4")
-    # ε is the learned edge-sphere threshold (eps_base). It is only
+    # eps is the learned edge-sphere threshold (eps_base). It is only
     # "macro-conditioned" when cfg.use_macro_eps=True (default False), so the
     # generic title would be misleading in a thesis appendix.
+    # KNOW this only reads eps_base, not the per-day macro-conditioned eps_t
     axes[0, 0].set_title("ε  (learned edge-sphere threshold, eps_base)")
     axes[0, 0].grid(alpha=0.3)
 
@@ -536,6 +537,7 @@ def plot_strategy_pnl(preds: pd.DataFrame, target: str, run: Path, out: Path) ->
     direction-only proxy, not real return magnitude). Useful for a quick "is
     the position-sizing rule helping?" check.
     """
+    # KNOW this is a sign-only proxy, it ignores how big each move actually was
     direction_ret = np.where(preds["label"].values == 1, 1.0, -1.0)
     pnl = preds["position_size"].values * direction_ret
     cum = np.cumsum(pnl)
@@ -551,7 +553,7 @@ def plot_strategy_pnl(preds: pd.DataFrame, target: str, run: Path, out: Path) ->
 
 
 # ----------------------------------------------------------------------------
-# 7. graph network — target-centric radial layout, 4 days side by side
+# 7. graph network, target-centric radial layout, 4 days side by side
 # ----------------------------------------------------------------------------
 def _draw_radial_graph(ax, adj, tickers, target, top_k=20, title=""):
     """Plot target at the centre, top-k neighbours by edge weight on a ring,
@@ -609,8 +611,8 @@ def _draw_radial_graph(ax, adj, tickers, target, top_k=20, title=""):
     ax.annotate(target, (0, 0), fontsize=10, fontweight="bold",
                 ha="center", va="center", color="white")
 
-    # ε circle: visual cue showing roughly where the sphere boundary sits.
-    # We don't store h_t so this is conceptual — placed at inner ring radius.
+    # eps circle: visual cue showing roughly where the sphere boundary sits.
+    # We don't store h_t so this is conceptual, just placed at inner ring radius.
     circle = plt.Circle((0, 0), inner_r, fill=False, ls="--",
                         color="#1f77b4", alpha=0.35, lw=1.2)
     ax.add_patch(circle)
@@ -658,13 +660,13 @@ def plot_graph_network(graphs, target: str, out: Path, n_panels: int = 4, top_k:
 
 
 # ----------------------------------------------------------------------------
-# 8. full universe — spring layout of the average learned graph
+# 8. full universe, spring layout of the average learned graph
 # ----------------------------------------------------------------------------
 def plot_full_graph(graphs, target: str, out: Path,
                     edge_weight_pct: float = 0.5, label_top_pct: float = 0.4) -> None:
     """Layout the entire universe at once using a force-directed (spring)
     embedding of the mean adjacency. Reveals the clustering structure the
-    GraphConstructor has learned — what other names AAPL gravitates toward,
+    GraphConstructor has learned: what other names AAPL gravitates toward,
     which stocks form tight communities, which sit on the periphery.
 
     edge_weight_pct: only draw edges in the top fraction of mean weights
@@ -684,8 +686,9 @@ def plot_full_graph(graphs, target: str, out: Path,
     n = len(tickers)
     ti = tickers.index(target) if target in tickers else -1
 
-    # Mean adjacency across the test period — symmetrise (max) so the layout
+    # Mean adjacency across the test period, symmetrise (max) so the layout
     # treats reciprocal-ish neighbourships consistently.
+    # KNOW averaging over time blurs any regime change in the learned graph
     mean_adj = np.mean([g["adj"] for g in graphs], axis=0)
     mean_adj_sym = np.maximum(mean_adj, mean_adj.T)
     np.fill_diagonal(mean_adj_sym, 0.0)
@@ -695,9 +698,9 @@ def plot_full_graph(graphs, target: str, out: Path,
         print("plot_full_graph: empty graph — skipping")
         return
 
-    # Build the FULL graph (all non-zero edges) for layout — this captures the
+    # Build the FULL graph (all non-zero edges) for layout, this captures the
     # true connectivity of the universe. Edges below `cutoff` are still
-    # *drawn* less prominently / hidden, but they participate in the spring
+    # *drawn* less prominently or hidden, but they participate in the spring
     # forces so isolated-looking stocks aren't pushed to a meaningless ring.
     cutoff_draw = float(np.quantile(flat, 1.0 - edge_weight_pct))
 
@@ -724,6 +727,7 @@ def plot_full_graph(graphs, target: str, out: Path,
     # then place any isolates in a ring around it. Pure spring_layout on a
     # graph with disconnected components puts the isolates on a wide perimeter
     # circle which dominates the picture and crushes the interesting structure.
+    # KNOW Kamada-Kawai needs scipy, the spring fallback is the no-scipy path
     components = sorted(nx.connected_components(g), key=len, reverse=True)
     if components:
         lcc = list(components[0])
@@ -731,7 +735,7 @@ def plot_full_graph(graphs, target: str, out: Path,
         if sub.number_of_edges() == 0:
             pos_lcc = nx.circular_layout(sub)
         else:
-            # Prefer Kamada-Kawai (needs scipy); fall back to a well-tuned
+            # Prefer Kamada-Kawai (needs scipy), fall back to a well-tuned
             # spring layout that spreads the LCC properly (large k, many iter).
             try:
                 pos_lcc = nx.kamada_kawai_layout(sub, weight="weight")
@@ -758,14 +762,14 @@ def plot_full_graph(graphs, target: str, out: Path,
             ang = 2 * np.pi * k / max(len(isolates), 1)
             pos[j] = np.array([ring_r * np.cos(ang), ring_r * np.sin(ang)])
 
-    # Node degree (weighted) on the full graph → size + colour.
+    # Node degree (weighted) on the full graph drives both size and colour.
     weighted_deg = mean_adj_sym.sum(axis=1)
     deg = weighted_deg.copy()
     label_cutoff = np.quantile(deg, 1.0 - label_top_pct) if deg.size else 0.0
 
     fig, ax = plt.subplots(figsize=(13, 13))
 
-    # Edges first (background) — only the high-weight ones we kept for drawing.
+    # Edges first (background), only the high-weight ones we kept for drawing.
     if g_draw.number_of_edges() > 0:
         ews = np.array([g_draw[u][v]["weight"] for u, v in g_draw.edges()])
         ew_max = float(ews.max()) if ews.size else 1.0
@@ -788,7 +792,7 @@ def plot_full_graph(graphs, target: str, out: Path,
     cbar = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label("mean weighted degree (centrality in the learned graph)")
 
-    # Target — make it pop.
+    # Target, make it pop.
     if ti >= 0:
         ax.scatter([pos[ti][0]], [pos[ti][1]], s=600, c="#d62728",
                     edgecolor="black", linewidth=1.5, zorder=4)
@@ -842,7 +846,7 @@ def main() -> None:
         produced.append("1_training_curves.png")
     if preds is not None and len(preds):
         if preds.attrs.get("schema") == "ranking":
-            # v3.6 universe-wide ranking model → ranking/backtest diagnostics
+            # v3.6 universe-wide ranking model, so use ranking/backtest diagnostics
             plot_ranking_overview(preds, _run_horizon(run), out / "2_ranking_overview.png")
             produced.append("2_ranking_overview.png")
         else:

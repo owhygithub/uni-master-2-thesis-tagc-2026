@@ -2,19 +2,19 @@
 
 map of the file, top to bottom:
 
-    1   PatchTSTEncoder   per-stock time series -> one vector per stock
-        MacroEncoder      10 macros -> one "what's the regime today" vector
+    1   PatchTSTEncoder   per-stock time series, one vector per stock
+        MacroEncoder      10 macros, one "what's the regime today" vector
         (the macro vector FiLMs the stock encoder)
 
-    2   GraphConstructor  builds a N×N adjacency that changes every day, with
+    2   GraphConstructor  builds a NxN adjacency that changes every day, with
                           GRU memory
 
     3   DenseGAT          graph attention over the adjacency from part 2
 
-    4   PredictionHead    little MLP w/ dropout -> one number per stock
+    4   PredictionHead    little MLP w/ dropout, one number per stock
 
 the encoder runs independently per ticker, so no cross-stock leakage inside it.
-cross-ticker info only flows through parts 2 + 3 — that's basically the thesis.
+cross-ticker info only flows through parts 2 + 3, that's basically the thesis.
 """
 from __future__ import annotations
 
@@ -31,11 +31,11 @@ from .config import Config
 log = logging.getLogger("tagc.model")
 
 
-# shared patch transformer — both the stock and macro encoders use it
+# shared patch transformer, both the stock and macro encoders use it
 class _PatchTransformer(nn.Module):
     """one PatchTST, reused for both the stock and macro encoders.
 
-    idea's from the PatchTST paper (Nie et al. 2023): instead of one token per
+    idea's from the PatchTST paper (Nie et al. 2023). instead of one token per
     day (seq len 90, expensive), chop the window into patches of patch_len days
     and make each patch a token. same window, ~9x fewer tokens, so faster and
     overfits less.
@@ -67,7 +67,7 @@ class _PatchTransformer(nn.Module):
         # change at start) but weights get a tiny non-zero init.
         # had a bug here: with zero weights, dloss/dr_t = 0, so the macro encoder
         # got literally no gradient at init. it only started learning once the
-        # FiLM weights drifted off zero on their own — super slow. tiny std-1e-3
+        # FiLM weights drifted off zero on their own, super slow. tiny std-1e-3
         # weight init opens the macro gradient path from step 1 and FiLM is still
         # basically identity. # WORKING
         if d_cond > 0:
@@ -88,7 +88,8 @@ class _PatchTransformer(nn.Module):
 
         # attention pool: a learnable query attends across the P patches.
         # beats dumb mean-pool since recent patches can get more weight than old
-        # ones, which is the whole point of attention.
+        # ones, which is the whole point of attention. # KNOW only active when
+        # use_attn_pool is True, otherwise forward() falls back to mean-pool.
         if use_attn_pool:
             self.pool_query = nn.Parameter(torch.zeros(1, 1, d_model))
             nn.init.trunc_normal_(self.pool_query, std=0.02)
@@ -128,7 +129,7 @@ class MacroEncoder(nn.Module):
 
     the 10 macros are totally different signals (SPY = equity beta, VIX = stress,
     IRX = short rates, GLD/USO = commodities, UUP = USD...). mean-pooling them
-    would be dumb — you'd average a vol spike with a rate cut and lose the lot.
+    would be dumb, you'd average a vol spike with a rate cut and lose the lot.
     so instead attention-pool with a learned query and let the model pick which
     macros matter each day (VIX in stress, IRX in rate shocks, etc).
 
@@ -187,11 +188,11 @@ class PatchTSTEncoder(nn.Module):
         return self.backbone(x, cond=r_t)          # [N, d_model]
 
 
-# graph constructor — GRU memory + bilinear similarity + edge EMA
+# graph constructor: GRU memory + bilinear similarity + edge EMA
 class GraphConstructor(nn.Module):
     """the actual thesis contribution.
 
-    builds the N×N stock adjacency that changes every day.
+    builds the NxN stock adjacency that changes every day.
 
     each day:
       1. take the N stock vectors z from the encoder
@@ -209,7 +210,7 @@ class GraphConstructor(nn.Module):
       apart from the graph's job (cross-stock similarity)
     - Q/K bilinear: attention-style sim, holds up in high dims where plain L2
       distance gets mushy
-    - edge EMA: kills day-to-day jitter; real cross-stock relationships move
+    - edge EMA: kills day-to-day jitter, real cross-stock relationships move
       slowly anyway
     - top-k: sparse trains faster and overfits less than dense
 
@@ -230,7 +231,7 @@ class GraphConstructor(nn.Module):
         self._log_sim = False
         # GRU's part of the novelty, but skip its params entirely when use_gru is
         # False so the no_gru ablation has a clean lower param count. graph_proj's
-        # input dim doesn't change — we always feed it d_model features (z is
+        # input dim doesn't change, we always feed it d_model features (z is
         # d_model, GRU output is gru_hidden which == d_model by default).
         if cfg.use_gru:
             self.gru = nn.GRUCell(cfg.d_model, cfg.gru_hidden)
@@ -243,7 +244,7 @@ class GraphConstructor(nn.Module):
         self.k_proj = nn.Linear(cfg.graph_proj_dim, cfg.graph_proj_dim, bias=False)
         self.sim_scale = 1.0 / math.sqrt(cfg.graph_proj_dim)
 
-        # eps baseline — learnable additive bias on the sim logits
+        # eps baseline, learnable additive bias on the sim logits
         self.eps_base = nn.Parameter(torch.tensor(float(cfg.eps_init)))
         self.tau = cfg.tau
         self.topk = cfg.topk
@@ -255,7 +256,7 @@ class GraphConstructor(nn.Module):
             nn.init.zeros_(self.eps_mlp.bias)
 
         # macro-FiLM on the Q/K projections. lets the similarity surface bend
-        # with the regime — risk-off everyone correlates more (flatter), calm
+        # with the regime: risk-off everyone correlates more (flatter), calm
         # everyone's more idiosyncratic (sharper). zero-init so gamma=beta=0 at
         # start (same as before), then it learns.
         # TODO check if this actually helps or just adds params
@@ -319,7 +320,7 @@ class GraphConstructor(nn.Module):
             Q = Q * (1.0 + gQ) + bQ
             K = K * (1.0 + gK) + bK
         sim = (Q @ K.transpose(0, 1)) * self.sim_scale
-        # grab the raw spread BEFORE standardising — this is the real "did
+        # grab the raw spread BEFORE standardising, this is the real "did
         # centering actually expose pairwise structure?" number. the line below
         # forces sim.std -> ~1 so the post-std value tells you nothing.
         sim_raw_std = float(sim.std().detach())
@@ -397,8 +398,9 @@ class DenseGAT(nn.Module):
 
     takes the per-stock features h and the adjacency A from part 2 and lets each
     stock attend to its neighbours. attention is gated by A, so edges not in the
-    graph contribute nothing. 3 layers = 3-hop propagation (a stock can get
-    influenced by friends-of-friends-of-friends).
+    graph contribute nothing. n_layers_gat hops of propagation (a stock can get
+    influenced by friends-of-friends), default 2 since 3 over-smooths.
+    # KNOW: this docstring used to say "3 layers", but HPO dropped it to 2.
     """
 
     def __init__(self, cfg: Config):
@@ -426,8 +428,8 @@ class DenseGAT(nn.Module):
 class PredictionHead(nn.Module):
     """little MLP that turns each stock's embedding into a number.
 
-    dropout stays on at inference too — we sample mc_samples times, mean is the
-    prediction and std is the uncertainty. uncertainty drives position sizing:
+    dropout stays on at inference too, we sample mc_samples times, mean is the
+    prediction and std is the uncertainty. uncertainty drives position sizing,
     bet bigger when we're more confident.
     """
 
@@ -451,10 +453,10 @@ class PredictionHead(nn.Module):
 class TAGC(nn.Module):
     """router. cfg.model_variant picks which sub-pipeline runs:
 
-        "tagc"          full   encoder -> GraphConstructor (GRU+bilinear+EMA) -> GAT -> head
-        "no_gru"        ablate encoder -> GraphConstructor without GRU (h <- z) -> GAT -> head
-        "static_graph"  ablate encoder ->        A_static (sector-based)        -> GAT -> head
-        "no_graph"      ablate encoder ->                                           head
+        "tagc"          full   encoder, GraphConstructor (GRU+bilinear+EMA), GAT, head
+        "no_gru"        ablate encoder, GraphConstructor without GRU (h = z), GAT, head
+        "static_graph"  ablate encoder, A_static (sector-based), GAT, head
+        "no_graph"      ablate encoder, head
 
     they all share the same encoder + (maybe) GAT + head, so the only thing that
     changes is what produces the adjacency / node features fed into the GAT.
@@ -471,7 +473,7 @@ class TAGC(nn.Module):
         self.macro_encoder = MacroEncoder(cfg)
         self.stock_encoder = PatchTSTEncoder(cfg)
         # constructor (part 2) only for variants that learn a graph: tagc,
-        # no_gru, no_gat. (no_gat keeps the constructor but drops the GAT — to
+        # no_gru, no_gat. (no_gat keeps the constructor but drops the GAT, to
         # test whether the message-passing actually matters.)
         _USES_CONSTRUCTOR = ("tagc", "no_gru", "no_gat")
         self.graph = GraphConstructor(cfg) if cfg.model_variant in _USES_CONSTRUCTOR else None
@@ -529,6 +531,8 @@ class TAGC(nn.Module):
         no-op for the other variants."""
         if self.cfg.model_variant == "static_graph":
             df = self._static_adj_df.reindex(index=tickers, columns=tickers)
+            # FIX brittle if the static_graph parquet uses lowercase tickers, the
+            # reindex would silently NaN every row and trip the check below.
             if df.isna().any().any():
                 missing = df.index[df.isna().any(axis=1)].tolist()
                 raise ValueError(f"static_graph_path missing tickers: {missing[:5]}...")
@@ -573,12 +577,12 @@ class TAGC(nn.Module):
         z = self.stock_encoder(X_stock, r_t=r_t)
 
         # center embeddings across stocks each day, otherwise they're nearly
-        # identical (cosine ~0.99) — the market-wide common move swamps the
+        # identical (cosine ~0.99), the market-wide common move swamps the
         # per-stock signal. subtracting the cross-stock mean kills that common
         # factor so the graph / GAT / residual all see comparable de-meaned
         # per-stock reps, and the real signal is first-order instead of a tiny
         # wiggle. (goes with dropping the market-wide calendar features from the
-        # encoder input — see config._FINAL_STOCK_FEATURES.) # WORKING
+        # encoder input, see config._FINAL_STOCK_FEATURES.) # WORKING
         if getattr(self.cfg, "cross_sectional_norm", False):
             z = z - z.mean(dim=0, keepdim=True)
 
@@ -601,7 +605,7 @@ class TAGC(nn.Module):
 
         # variant routing
         if self.cfg.model_variant == "no_graph":
-            # no graph, no GAT — straight encoder -> head. use z_residual so the
+            # no graph, no GAT, straight encoder to head. use z_residual so the
             # stock_id_in_residual flag still applies.
             embeds = z_residual
             logits = self.head(embeds)
@@ -619,7 +623,7 @@ class TAGC(nn.Module):
             h = z                       # no GRU, node features are the encoder output
             eps = torch.tensor(0.0, device=device)
         elif self.cfg.model_variant == "random_graph":
-            # fixed random adjacency — the arbitrary-graph control
+            # fixed random adjacency, the arbitrary-graph control
             if not self._random_A_ready:
                 raise RuntimeError(
                     "random_graph variant requires model.set_universe_tickers(...) first.")

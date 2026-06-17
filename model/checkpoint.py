@@ -3,6 +3,9 @@
 a checkpoint is just a torch.save bundle: model + optimizer state, the feature
 scaler (mean/std), the Config, and bookkeeping (epoch, best val, rng states).
 so a run can resume after getting killed, and inference is fully self-contained.
+
+# TODO the rng states are saved but resume mid-epoch isn't truly bit-exact,
+# we only resume on epoch boundaries, so close enough for the thesis.
 """
 from __future__ import annotations
 
@@ -79,11 +82,11 @@ def maybe_resume(
     """if last.pt is in out_dir, load it into model+optimizer and return the payload.
 
     hard-fails (on purpose) with a clear message if the saved architecture doesn't
-    match the current model — that's almost always a config change you want to know about.
+    match the current model, that's almost always a config change you want to know about.
 
     cfg is the LIVE run config; we compare the saved horizon/target against it.
     # KNOW this used to compare against a fresh Config() default, so a resume with a
-    # non-default horizon got checked against the wrong reference — fixed.
+    # non-default horizon got checked against the wrong reference, now fixed.
     """
     last = out_dir / CKPT_LAST
     if not last.exists():
@@ -130,8 +133,9 @@ def maybe_resume(
     try:
         optimizer.load_state_dict(ckpt["optim_state"])
     except (KeyError, ValueError):
-        # optimizer groups changed but the weights loaded fine — just start the
-        # optimizer fresh instead of crashing.
+        # optimizer groups changed but the weights loaded fine, so just start the
+        # optimizer fresh instead of crashing. # KNOW resume keeps the model but
+        # drops the optimizer momentum here, fine for a short interruption.
         pass
     torch.set_rng_state(ckpt["torch_rng"])
     if ckpt.get("cuda_rng") is not None and torch.cuda.is_available():

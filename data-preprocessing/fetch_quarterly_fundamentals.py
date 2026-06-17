@@ -6,7 +6,7 @@ Free, no API key, no rate limits (just polite throttling).
 
 Fixes in this version:
   - Expanded XBRL concept fallbacks (fixes no-usable-data for GS, MSFT, CAT etc.)
-  - revenue/net_income NOT forward-filled (flow concepts — ffill would repeat
+  - revenue/net_income NOT forward-filled (flow concepts, ffill would repeat
     annual values into quarterly rows, distorting profit_margin)
   - Only balance sheet items (total_debt, total_equity) are forward-filled
   - total_debt zero-filled where missing and equity exists (genuinely zero debt)
@@ -95,7 +95,7 @@ CONCEPT_FALLBACKS = {
         "ShortTermBorrowings",
     ],
     "total_equity": [
-        # Only true equity concepts — NOT LiabilitiesAndStockholdersEquity
+        # Only true equity concepts, NOT LiabilitiesAndStockholdersEquity
         "StockholdersEquity",
         "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
         "PartnersCapital",
@@ -130,7 +130,7 @@ def extract_concept(facts, concept_keys, is_balance_sheet=False):
                 continue
 
             # Period-length filter for flow concepts only.
-            # 10-Q: no length filter — 180-day gap filter is sufficient.
+            # 10-Q: no length filter, the 180-day gap filter is sufficient.
             #        52-week fiscal companies (AAPL, MSFT, COST) have inconsistent
             #        XBRL start dates causing valid quarters to fail length checks.
             # 10-K: must be annual (330-400 days) to exclude stub periods.
@@ -154,7 +154,7 @@ def extract_concept(facts, concept_keys, is_balance_sheet=False):
             if filed < existing["filed"]:
                 out[end] = {"val": val, "filed": filed, "form": form}
 
-        # Merge into master dict — first concept to cover a date wins,
+        # Merge into master dict, first concept to cover a date wins,
         # subsequent concepts fill in missing dates only
         for date, info in out.items():
             if date not in master:
@@ -185,6 +185,7 @@ def build_ticker_frame(ticker, facts):
         # Revenue: exact match first, then nearest date within 10 days
         # Apple and other 52-week fiscal year companies sometimes have
         # revenue XBRL dates 1-2 days off from net_income dates
+        # KNOW the 10-day window is a fudge for those off-by-a-day fiscal calendars
         revenue = rev_vals.get(date)
         if revenue is None and rev_vals:
             close = min(rev_vals, key=lambda d: abs((pd.to_datetime(d) - pd.to_datetime(date)).days))
@@ -242,13 +243,13 @@ def build_ticker_frame(ticker, facts):
     df = df.drop_duplicates(subset=["fiscal_period_end"], keep="first")
 
     # 2. Forward-fill ONLY balance sheet items (point-in-time, safe to carry forward)
-    #    Do NOT ffill revenue/net_income — these are flow concepts; repeating an
+    #    Do NOT ffill revenue/net_income, these are flow concepts. repeating an
     #    annual value into quarterly rows would corrupt profit_margin
     bs_ffill = ["total_debt", "total_equity", "debt_to_equity"]
     df[bs_ffill] = df[bs_ffill].ffill()
 
     # 3. Zero-fill total_debt where still missing but equity exists
-    #    (company genuinely carries no debt — EDGAR simply has no filing for it)
+    #    (company genuinely carries no debt, EDGAR simply has no filing for it)
     df["total_debt"] = df["total_debt"].fillna(0)
     df["debt_to_equity"] = np.where(
         df["total_equity"].notna() & (df["total_equity"] != 0),
@@ -257,6 +258,7 @@ def build_ticker_frame(ticker, facts):
 
 
     # 5. Winsorize ratios at 1st/99th percentile
+    # FIX step numbering skips 4, harmless but the comments are off-by-one
     for col in ["profit_margin", "debt_to_equity", "roe"]:
         lo = df[col].quantile(0.01)
         hi = df[col].quantile(0.99)

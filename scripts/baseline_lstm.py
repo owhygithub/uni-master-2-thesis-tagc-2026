@@ -1,11 +1,11 @@
-"""Proper single-stock LSTM baseline — the "is the graph worth it?" reference.
+"""Proper single-stock LSTM baseline, the "is the graph worth it?" reference.
 
-A real trained sequence model on the TARGET STOCK ONLY. Aim: a baseline that
-actually exercises modern best practices, so the comparison to TAGC is fair.
+A real trained sequence model on the TARGET STOCK ONLY. The aim is a baseline
+that actually exercises modern best practices, so the comparison to TAGC is fair.
 
-Design — based on published peer-reviewed SOTA on daily stock direction:
+Design, based on published peer-reviewed SOTA on daily stock direction:
   • Architecture (v3.3): 3-layer LSTM, 128 hidden, 0.25 dropout, layer-norm head.
-  • Window: 60 days (the most common choice in the literature — Patel 2015,
+  • Window: 60 days (the most common choice in the literature: Patel 2015,
     StockNet 2018, Adv-ALSTM 2019, and most LSTM tutorials use 60).
   • Features: target ticker's full feature panel (price, technicals,
     fundamentals, options, seasonality, engineered, optionally news).
@@ -81,6 +81,7 @@ def _load_target_panel(cfg: Config, target: str):
     val_end   = int(D * (cfg.train_frac + cfg.val_frac))
 
     # Per-ticker training-mean centering (same convention as TAGC).
+    # KNOW center is computed on TRAIN only, so no look-ahead into val/test
     center = float(np.nanmean(y_raw[:train_end]))
     y = y_raw - center
 
@@ -96,14 +97,14 @@ def _windowed(X, y, indices, W):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Model — LSTM
+# Model: LSTM
 # ───────────────────────────────────────────────────────────────────────────
 class LSTMBaseline(nn.Module):
-    """3-layer LSTM → LayerNorm → MLP head with MC-Dropout.
+    """3-layer LSTM, then LayerNorm, then MLP head with MC-Dropout.
 
-    v3.3 thesis-depth sizes (hidden=128, layers=3, dropout=0.25) — matches
+    v3.3 thesis-depth sizes (hidden=128, layers=3, dropout=0.25), matches
     the StockNet (ACL-18) / Adv-ALSTM (ACL-18) reference size class. Earlier
-    versions ran a toy-sized LSTM (64 hidden, 2 layers) — too small for a
+    versions ran a toy-sized LSTM (64 hidden, 2 layers), too small for a
     master-thesis-level "is the encoder worth it?" comparison.
     """
 
@@ -273,7 +274,9 @@ def train_and_eval(cfg, target, out_dir, *, epochs, window, hidden, n_layers,
             log.info("early stop at epoch %d (no improvement for %d epochs)", ep, no_improve)
             break
 
-    # Test with MC-Dropout
+    # Test with MC-Dropout. flip dropout layers back to train() so each pass
+    # samples a different subnet, the spread gives us a cheap uncertainty band.
+    # KNOW only Dropout modules are re-enabled, everything else stays in eval()
     state = torch.load(best_path, map_location=device, weights_only=False)
     model.load_state_dict(state["model"])
     for m in model.modules():

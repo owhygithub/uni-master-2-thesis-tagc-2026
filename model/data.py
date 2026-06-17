@@ -151,6 +151,7 @@ def prepare(cfg: Config):
     stocks_panel, macro_panel, labels, mask, dates, tickers, macro_tickers = _load_panels(cfg)
 
     # push ticker counts back into cfg so the model can size itself off it
+    # TODO double-check this still lines up when last_n_days drops a thin tail.
     cfg.n_stocks = len(tickers)
     cfg.n_macro  = len(macro_tickers)
     # target ticker -> int index. hard error if it's not in the universe, no point
@@ -164,6 +165,7 @@ def prepare(cfg: Config):
 
     # KNOW the regression target comes from close_ret_raw read straight off the
     # parquet, NOT from the feature panel. otherwise it'd leak in as an input.
+    # FIX brittle if the parquet schema renames the return column, this just raises.
     target_col = cfg.regression_target_col
     stocks_df_raw = pd.read_parquet(cfg.stocks_parquet)
     if target_col not in stocks_df_raw.columns:

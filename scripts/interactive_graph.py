@@ -1,7 +1,7 @@
 """Interactive HTML graph viewer (pyvis / vis.js).
 
 Smooth, physics-based, floating nodes:
-  - Drag any node — physics keeps the rest balanced
+  - Drag any node, physics keeps the rest balanced
   - Mouse-wheel zoom, click-and-drag to pan
   - Hover any node to highlight its connections and see the tooltip
   - Sector-coloured nodes (12 sectors + 'other'); node size = weighted degree
@@ -93,7 +93,7 @@ def _load_sectors(run: Path, tickers: List[str]) -> Dict[str, str]:
 # Choose which adjacency to show
 # ──────────────────────────────────────────────────────────────────────────
 def _pick_adj(graphs: List[dict], date: Optional[str]) -> Tuple[np.ndarray, str, float]:
-    """Return (adjacency, title, eps) — either a specific date or the time-mean."""
+    """Return (adjacency, title, eps), either a specific date or the time-mean."""
     if date is not None:
         for g in graphs:
             if g["date"] == date:
@@ -118,9 +118,9 @@ def _top_neighbours(adj_row: np.ndarray, tickers: List[str], k: int = 5) -> List
 
 def _compute_layout(A: np.ndarray, seed: int = 42, scale: float = 480.0) -> np.ndarray:
     """One fixed [N, 2] layout from the (already filtered) adjacency, so we can
-    PIN node positions and run with physics DISABLED — stable, no rotation, no
-    drift. Kamada-Kawai on the largest component (prettier for sparse graphs),
-    falling back to spring; isolates ring around the outside."""
+    PIN node positions and run with physics DISABLED, so it stays stable: no
+    rotation, no drift. Kamada-Kawai on the largest component (prettier for
+    sparse graphs), falling back to spring, isolates ring around the outside."""
     import networkx as nx
     n = A.shape[0]
     G = nx.Graph()
@@ -171,15 +171,16 @@ def build_network(
     # ── per-node top-k filter (NOT global cutoff) ────────────────────────
     # The old viz used a global percentile cutoff which hid the actual
     # edges the model learned for peripheral stocks. Now we mirror what
-    # the model itself does: keep the top-k strongest edges per node.
-    # Every node gets at least min(k, n-1) edges → no isolated nodes.
+    # the model itself does, so we keep the top-k strongest edges per node.
+    # Every node gets at least min(k, n-1) edges, so no isolated nodes.
+    # KNOW this is per-node top-k, not a global cutoff, so totals vary by node
     if per_node_topk > 0 and per_node_topk < A.shape[0]:
         keep = np.zeros_like(A, dtype=bool)
         for i in range(A.shape[0]):
             # indices of the k strongest neighbours for row i
             top_idx = np.argpartition(-A[i], per_node_topk)[:per_node_topk]
             keep[i, top_idx] = True
-        # symmetrise the mask — i↔j is shown if either direction made the cut
+        # symmetrise the mask, i to j is shown if either direction made the cut
         keep = keep | keep.T
         A = np.where(keep, A, 0.0)
 
@@ -200,7 +201,7 @@ def build_network(
         directed=False,
     )
     # Physics DISABLED. Node positions are precomputed once (see _compute_layout)
-    # and PINNED, so the graph is completely stable — it never rotates, drifts,
+    # and PINNED, so the graph is completely stable, it never rotates, drifts,
     # or jitters, and there's nothing to "settle". You can still drag any node to
     # reposition it (it just stays where you drop it), scroll to zoom, and pan.
     # This is the most predictable way to "look around" a fixed graph.

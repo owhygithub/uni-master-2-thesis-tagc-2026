@@ -3,7 +3,7 @@ Render the project's docs as Jupyter notebooks so the markdown displays nicely.
 
 Each .md/.txt doc becomes a .ipynb under docs_notebooks/, split into markdown
 cells by H2 (## ) section so each block renders on its own. Content is copied
-verbatim (this is a view, not an edit) — re-run any time the docs change.
+verbatim (this is a view, not an edit), so just re-run any time the docs change.
 
 Run: thesis-venv/bin/python scripts/make_doc_notebooks.py
 """
@@ -14,6 +14,7 @@ OUT = "docs_notebooks"
 os.makedirs(OUT, exist_ok=True)
 
 # (source path, output notebook name)
+# FIX hardcoded list, any new doc has to be added here by hand
 FILES = [
     ("manuals/README.md",            "01_README.ipynb"),
     ("manuals/GUIDE.md",             "02_GUIDE.ipynb"),
@@ -46,7 +47,7 @@ def md_to_cells(text):
         if not src.strip():
             continue
         lines = src.split("\n")
-        source = [l + "\n" for l in lines[:-1]] + [lines[-1]]   # nbformat line list
+        source = [l + "\n" for l in lines[:-1]] + [lines[-1]]   # nbformat wants a line list, last line no trailing newline
         out.append({"cell_type": "markdown", "metadata": {}, "source": source})
     return out
 

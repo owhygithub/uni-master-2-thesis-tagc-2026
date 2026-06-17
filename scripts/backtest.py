@@ -79,6 +79,7 @@ def backtest(predictions_csv,
         dates.append(pd.Timestamp(dt)); ks.append(K)
         daily_rank_ic.append(_spearman(s, r))
         # long-short legs
+        # KNOW nleg is at least 1, so tiny universes still form a portfolio
         nleg = max(1, int(round(decile * K)))
         order = np.argsort(s)                      # ascending
         short = r[order[:nleg]].mean()
@@ -95,6 +96,7 @@ def backtest(predictions_csv,
     ls_ov   = np.array(daily_ls, dtype=float)          # overlapping (one per trading day)
 
     # non-overlapping series: every H-th trading day (holding period ends before next forms)
+    # KNOW this is the honest headline series, the overlapping one is autocorrelated
     idx_no = np.arange(0, len(dates), max(1, horizon))
     ls_no  = ls_ov[idx_no]
     dates_no = dates[idx_no]

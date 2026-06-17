@@ -1,6 +1,6 @@
 """dump the full graph for a day to a .npz so i can inspect it / reuse it later.
 
-one file per (date, split) — the whole universe, not just a target-centric slice.
+one file per (date, split), the whole universe, not just a target-centric slice.
 what's in each file:
 
     adj      [N, N]       the adjacency (after top-k), rows = source, cols = target
@@ -10,6 +10,9 @@ what's in each file:
     eps      ()           macro-conditioned eps_t for that day
     tickers  [N]          symbols, same order as the rows/cols/embeds
     date     str          YYYY-MM-DD
+
+# KNOW: every saves the whole NxN adj, so on the 445-ticker universe this eats
+# disk fast if save_graphs_every=1 over a long test split.
 """
 from __future__ import annotations
 
@@ -41,6 +44,8 @@ class GraphLogger:
         if self.every <= 0:
             return
         self._counter += 1
+        # TODO the counter is per-call, so mixing splits through one logger would
+        # offset the every-N cadence, currently each split gets its own logger.
         if self._counter % self.every != 0:
             return
 
