@@ -1,0 +1,10 @@
+^SOX
+USO
+GLD
+UUP
+SPY
+^VIX
+^VIX9D
+^TNX
+^IRX
+HYG

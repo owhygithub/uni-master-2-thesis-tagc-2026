@@ -1,0 +1,17 @@
+torch>=2.0
+numpy>=1.23
+pandas>=2.0
+pyarrow>=12.0
+yfinance
+matplotlib
+yahoo-fin
+requests_html
+edgartools
+stockdex
+plotly
+networkx
+optuna>=4.0
+scikit-learn
+sentence-transformers
+datasets
+pyvis>=0.3
