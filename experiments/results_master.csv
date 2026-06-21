@@ -1,0 +1,10 @@
+run_id,variant,loss,horizon,seed,period,rank_ic,icir,sharpe_gross,hit_rate,dm_p_vs_full,notes
+h30_tagc_post,tagc,rank_mag,30,42,post2020,,,,,,reference
+h30_tagc_pre,tagc,rank_mag,30,42,pre2020,,,,,,reference
+h30_no_graph,no_graph,rank_mag,30,42,post2020,,,,,,RQ1
+h30_static_graph,static_graph,rank_mag,30,42,post2020,,,,,,RQ2
+h30_no_gru,no_gru,rank_mag,30,42,post2020,,,,,,RQ3
+h30_random_graph,random_graph,rank_mag,30,42,post2020,,,,,,RQ4
+h30_no_gat,no_gat,rank_mag,30,42,post2020,,,,,,support
+obj_huber,tagc,huber,30,42,post2020,,,,,,support
+obj_listmle,tagc,listmle,30,42,post2020,,,,,,support

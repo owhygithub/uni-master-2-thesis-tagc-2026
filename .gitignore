@@ -1,7 +1,10 @@
-/experiments
 /manuals
 /runs_final
 /test
 /hyperparam
 /__pycache__
 /data
+/experiments/2026-06-14_input_feature_screen
+/experiments/2026-06-14_m1m2_autoencoder_validity
+/experiments/__pycache__
+/experiments/runs_final
