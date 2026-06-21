@@ -599,7 +599,10 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
         with metrics_path.open("w", newline="") as f:
             csv.writer(f).writerow([
                 "epoch",
-                "train_mse",       "train_rank_loss",
+                # KNOW: train_mse historically stores the raw ListMLE rank loss
+                # (== train_rank_loss); kept for backward-compat. train_mag_loss
+                # is the REAL Huber/magnitude term — added so figures can plot it.
+                "train_mse",       "train_rank_loss",   "train_mag_loss",
                 "val_mse",         "val_rank_loss",
                 "val_rmse_pct",    "val_dir_acc",
                 "val_pred_mean",   "val_pred_std",
@@ -854,6 +857,7 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
                 epoch,
                 f"{train_loss:.6f}",
                 f"{train_rank_loss:.6f}",
+                f"{train_mag_loss:.6f}",
                 f"{val.loss:.6f}",
                 f"{val.rank_loss:.6f}",
                 f"{val.rmse_pct:.6f}",
@@ -915,6 +919,25 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
     except Exception as _e:
         log.warning("backtest skipped: %s", _e)
 
+    # auto-generate all figures + the interactive graph HTML right here, so no
+    # separate command is needed after training. # WORKING each generator is
+    # wrapped so a plotting failure never takes the run down.
+    try:
+        import sys as _sys
+        _repo = Path(__file__).resolve().parent.parent
+        if str(_repo) not in _sys.path:
+            _sys.path.insert(0, str(_repo))
+        from scripts import visualize as _viz, model_report as _rep, interactive_graph as _ig
+        figs = _viz.generate(out_dir)
+        qs = _rep.generate(out_dir)
+        html = _ig.generate(out_dir, quiet=True)
+        log.info("FIGURES    %d standard + %d question-figures -> %s/figures/",
+                 len(figs), len(qs), out_dir)
+        if html is not None:
+            log.info("INTERACTIVE  %s", html)
+    except Exception as _e:
+        log.warning("figure generation skipped: %s", _e)
+
     # dashboard dump
     log.info("")
     log.info("╔══════════════════════════════════════════════════════════════╗")
@@ -939,11 +962,14 @@ def train(cfg: Config, out_dir: Path, resume: bool = True) -> Dict[str, EvalResu
     log.info("║   metrics.csv                       per-epoch curves          ║")
     log.info("║   predictions_test.csv              per-day MC predictions    ║")
     log.info("║   graphs/                           full per-day adj + embeds ║")
+    log.info("║   figures/*.png                     auto-generated this run   ║")
+    log.info("║   figures/interactive_graph.html    auto-generated this run   ║")
+    log.info("║   backtest_summary.csv              gross L/S Sharpe + Rank-IC║")
     log.info("╠══════════════════════════════════════════════════════════════╣")
-    log.info("║ next steps:                                                   ║")
-    log.info("║   visualise:  python scripts/visualize.py <out_dir>           ║")
-    log.info("║   interactive: python scripts/interactive_graph.py <out_dir>  ║")
-    log.info("║   predict:    python scripts/predict_v2.py <out_dir> --date X ║")
-    log.info("║   walk-fwd:   python scripts/walk_forward.py <out_dir>        ║")
+    log.info("║ figures + interactive graph were generated automatically.    ║")
+    log.info("║ to re-render manually:                                        ║")
+    log.info("║   python scripts/visualize.py <out_dir>                       ║")
+    log.info("║   python scripts/model_report.py <out_dir>                    ║")
+    log.info("║   python scripts/interactive_graph.py <out_dir> --open        ║")
     log.info("╚══════════════════════════════════════════════════════════════╝")
     return {"val": last_val, "test": test_plain, "test_mc": test_mc}

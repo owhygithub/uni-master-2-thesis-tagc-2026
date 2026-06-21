@@ -28,7 +28,7 @@ import glob
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -227,14 +227,18 @@ def plot_training_curves(metrics: pd.DataFrame, out: Path) -> None:
     # ---- v2 (regression + ranking) 2×2 grid --------------------------------
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
 
-    # (a) MSE loss
+    # (a) magnitude / Huber term.  NOTE train_mse historically stored the rank
+    # loss, not the Huber — so we plot the REAL train Huber (train_mag_loss) when
+    # it's present, and the single-target val MSE alongside it. # KNOW
     ax = axes[0, 0]
-    if "train_mse" in metrics:
-        ax.plot(ep, metrics["train_mse"], "o-", label="train", color="#1f77b4", ms=3)
+    if "train_mag_loss" in metrics and metrics["train_mag_loss"].notna().any():
+        ax.plot(ep, metrics["train_mag_loss"], "o-", label="train Huber (magnitude)",
+                color="#1f77b4", ms=3)
     if "val_mse" in metrics:
-        ax.plot(ep, metrics["val_mse"], "o-", label="val", color="#d62728", ms=3)
-    ax.set_xlabel("epoch"); ax.set_ylabel("MSE (scaled target units)")
-    ax.set_title("(a) Huber/MSE loss"); ax.legend(fontsize=8); ax.grid(alpha=0.3)
+        ax.plot(ep, metrics["val_mse"], "o-", label="val target MSE", color="#d62728", ms=3)
+    ax.set_xlabel("epoch"); ax.set_ylabel("loss (scaled target units)")
+    ax.set_title("(a) Magnitude: train Huber + val target MSE")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
     # (b) Ranking (ListMLE) loss
     ax = axes[0, 1]
@@ -825,14 +829,13 @@ def plot_full_graph(graphs, target: str, out: Path,
 # ----------------------------------------------------------------------------
 # main
 # ----------------------------------------------------------------------------
-def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("run_dir", type=Path, help="path to a run directory (e.g. runs/local)")
-    p.add_argument("--out", type=Path, default=None, help="output dir (default: <run>/figures)")
-    args = p.parse_args()
-
-    run = args.run_dir
-    out = args.out or run / "figures"
+def generate(run: Path, out: Optional[Path] = None) -> List[str]:
+    """Render every figure for a run dir. Importable so train.py can call it
+    straight after training (no separate command needed). Returns the filenames
+    written. # WORKING this is the single entry point both main() and the
+    end-of-training hook use."""
+    run = Path(run)
+    out = Path(out) if out is not None else run / "figures"
     out.mkdir(parents=True, exist_ok=True)
     target = _target_ticker(run)
 
@@ -840,7 +843,7 @@ def main() -> None:
     preds   = _load_predictions(run)
     graphs  = _load_graphs(run)
 
-    produced = []
+    produced: List[str] = []
     if metrics is not None and len(metrics):
         plot_training_curves(metrics, out / "1_training_curves.png")
         produced.append("1_training_curves.png")
@@ -861,8 +864,18 @@ def main() -> None:
         plot_full_graph(graphs, target, out / "8_full_graph.png")
         produced += ["4_graph_summary.png", "5_top_neighbours.png",
                      "7_graph_network.png", "8_full_graph.png"]
+    return produced
 
-    print(f"target = {target}")
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("run_dir", type=Path, help="path to a run directory (e.g. runs/local)")
+    p.add_argument("--out", type=Path, default=None, help="output dir (default: <run>/figures)")
+    args = p.parse_args()
+
+    out = args.out or args.run_dir / "figures"
+    produced = generate(args.run_dir, out)
+    print(f"target = {_target_ticker(args.run_dir)}")
     print(f"wrote {len(produced)} figures to {out}:")
     for f in produced:
         print(f"  - {f}")

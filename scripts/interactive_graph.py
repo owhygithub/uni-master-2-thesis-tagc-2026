@@ -279,8 +279,10 @@ def build_network(
             physics=False,
         )
 
-    # Add edges (above the cutoff).
+    # Add edges (above the cutoff). Collect them so we can report the actual
+    # strongest connections the model learned (the "overview" panel).
     max_edge = float(A.max()) if A.max() > 0 else 1.0
+    edge_list: List[Tuple[str, str, float]] = []
     for i in range(n):
         for j in range(i + 1, n):
             w = float(A[i, j])
@@ -289,6 +291,25 @@ def build_network(
             # Edge width scaled to weight; cap at 6 px.
             ew = float(0.4 + 5.6 * (w / max_edge))
             net.add_edge(i, j, value=float(w), width=ew, title=f"weight {w:.3f}")
+            edge_list.append((tickers[i], tickers[j], w))
+
+    # ── overview stats (drives the header summary bar) ───────────────────────
+    n_edges = len(edge_list)
+    possible = n * (n - 1) / 2.0
+    edge_ws = np.array([w for _, _, w in edge_list], dtype=np.float32) if edge_list else np.zeros(1)
+    hub_idx = int(np.argmax(deg)) if deg.size else 0
+    strongest = sorted(edge_list, key=lambda e: -e[2])[:10]
+    stats = {
+        "n_nodes": n,
+        "n_edges": n_edges,
+        "density": (n_edges / possible) if possible else 0.0,
+        "avg_deg": float(deg.mean()) if deg.size else 0.0,
+        "max_deg": float(deg.max()) if deg.size else 0.0,
+        "hub": tickers[hub_idx],
+        "mean_w": float(edge_ws.mean()),
+        "max_w": float(edge_ws.max()),
+        "strongest": strongest,
+    }
 
     # Insert a small custom header above the canvas (sector legend).
     legend_items = "".join(
@@ -298,11 +319,58 @@ def build_network(
         for s, c in SECTOR_COLORS.items()
     )
     title = f"TAGC graph — target {target_ticker}  ·  {title_extra}"
-    return net, title, legend_items
+    return net, title, legend_items, stats
+
+
+def _stats_bar(stats: dict) -> str:
+    """A compact metric strip: at-a-glance what this graph looks like."""
+    if not stats:
+        return ""
+    cells = [
+        ("stocks",        f"{stats['n_nodes']}"),
+        ("edges shown",   f"{stats['n_edges']}"),
+        ("density",       f"{stats['density']*100:.1f}%"),
+        ("avg weighted deg", f"{stats['avg_deg']:.2f}"),
+        ("busiest hub",   f"{stats['hub']} ({stats['max_deg']:.2f})"),
+        ("mean / max edge w", f"{stats['mean_w']:.3f} / {stats['max_w']:.3f}"),
+    ]
+    items = "".join(
+        f"<div style='display:inline-flex;flex-direction:column;margin-right:26px;'>"
+        f"<span style='font-size:17px;font-weight:600;color:#8be9fd;'>{v}</span>"
+        f"<span style='font-size:10px;color:#888;text-transform:uppercase;"
+        f"letter-spacing:.04em;'>{k}</span></div>"
+        for k, v in cells
+    )
+    return (f"<div style='margin-top:10px;display:flex;flex-wrap:wrap;align-items:flex-end;'>"
+            f"{items}</div>")
+
+
+def _strongest_panel(stats: dict) -> str:
+    """Floating panel: the actual strongest learned connections + their weights."""
+    if not stats or not stats.get("strongest"):
+        return ""
+    rows = "".join(
+        f"<tr><td style='padding:2px 10px 2px 0;color:#ffd166;'>{a}</td>"
+        f"<td style='padding:2px 6px;color:#666;'>↔</td>"
+        f"<td style='padding:2px 10px 2px 0;color:#ffd166;'>{b}</td>"
+        f"<td style='padding:2px 0;color:#8be9fd;text-align:right;font-variant-numeric:tabular-nums;'>"
+        f"{w:.3f}</td></tr>"
+        for a, b, w in stats["strongest"]
+    )
+    return (
+        "<div style='position:fixed;top:120px;right:18px;z-index:999;"
+        "background:rgba(31,31,40,0.93);border:1px solid #2a2a36;border-radius:10px;"
+        "padding:12px 14px;font-family:Inter,system-ui,sans-serif;max-width:260px;"
+        "box-shadow:0 6px 24px rgba(0,0,0,0.4);'>"
+        "<div style='font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;"
+        "margin-bottom:6px;'>strongest connections (edge weight)</div>"
+        f"<table style='font-size:12px;border-collapse:collapse;'>{rows}</table></div>"
+    )
 
 
 def _wrap_with_header(net_html: str, title: str, legend: str, run_path: Path,
-                     date_options: List[str], current_date: Optional[str]) -> str:
+                     date_options: List[str], current_date: Optional[str],
+                     stats: Optional[dict] = None) -> str:
     """Wrap the pyvis HTML with a header + date selector (if multiple snapshots)."""
     date_select = ""
     if len(date_options) > 1:
@@ -335,8 +403,10 @@ def _wrap_with_header(net_html: str, title: str, legend: str, run_path: Path,
       drag nodes · scroll to zoom · hover for neighbours · physics OFF (fixed layout, no drift)
     </div>
   </div>
+  {_stats_bar(stats)}
   <div style="margin-top:8px;">{legend}</div>
 </div>
+{_strongest_panel(stats)}
 <style>
   body {{ margin:0; background:#15151c; }}
   #mynetwork {{ background:#15151c !important; border:none !important; }}
@@ -356,6 +426,54 @@ def _wrap_with_header(net_html: str, title: str, legend: str, run_path: Path,
 # ──────────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────────
+def generate(run_dir, out=None, per_node_topk: int = 5, date: Optional[str] = None,
+             open_browser: bool = False, quiet: bool = False) -> Optional[Path]:
+    """Build the interactive HTML for a run dir. Importable so train.py can call
+    it straight after training. Returns the output path (or None if no graphs
+    were logged). # WORKING shared by main() and the end-of-training hook."""
+    run = Path(run_dir)
+    graphs = _load_graphs(run)
+    if not graphs:
+        if not quiet:
+            print(f"no graphs in {run}/graphs/test_*.npz — nothing to render")
+        return None
+
+    target = _target_ticker(run)
+    tickers = graphs[0]["tickers"]
+    sectors = _load_sectors(run, tickers)
+    date_options = [g["date"] for g in graphs]
+
+    adj, label, eps = _pick_adj(graphs, date)
+    if not quiet:
+        n_sectors_present = len({sectors[t] for t in tickers})
+        print(f"target  = {target}")
+        print(f"frames  = {len(graphs)} ({date_options[0]} → {date_options[-1]})")
+        print(f"sectors = {n_sectors_present} present")
+        print(f"showing = {label}   ε = {eps:.3f}")
+
+    title_extra = (f"{label} · ε={eps:.3f} · "
+                    f"top-{per_node_topk} edges per node "
+                    f"(matches the model's own sparsification)")
+    net, title, legend, stats = build_network(adj, tickers, sectors, target,
+                                              per_node_topk=per_node_topk,
+                                              title_extra=title_extra)
+
+    out = Path(out) if out else run / "figures" / "interactive_graph.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    # pyvis writes the file itself; we wrap it after with our header.
+    raw_html = net.generate_html(notebook=False)
+    full_html = _wrap_with_header(raw_html, title, legend, run, date_options, date, stats)
+    out.write_text(full_html, encoding="utf-8")
+
+    if not quiet:
+        print(f"wrote   {out}  ({out.stat().st_size / 1e6:.1f} MB)")
+        print(f"open    file://{out.resolve()}")
+    if open_browser:
+        webbrowser.open(f"file://{out.resolve()}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -372,43 +490,10 @@ def main():
                     help="open the produced file in the default browser")
     args = ap.parse_args()
 
-    run = Path(args.run_dir)
-    graphs = _load_graphs(run)
-    if not graphs:
-        raise SystemExit(f"no graphs in {run}/graphs/test_*.npz — train first")
-
-    target = _target_ticker(run)
-    tickers = graphs[0]["tickers"]
-    sectors = _load_sectors(run, tickers)
-    date_options = [g["date"] for g in graphs]
-
-    adj, label, eps = _pick_adj(graphs, args.date)
-    n_sectors_present = len({sectors[t] for t in tickers})
-    print(f"target  = {target}")
-    print(f"frames  = {len(graphs)} ({date_options[0]} → {date_options[-1]})")
-    print(f"sectors = {n_sectors_present} present")
-    print(f"showing = {label}   ε = {eps:.3f}")
-
-    title_extra = (f"{label} · ε={eps:.3f} · "
-                    f"top-{args.per_node_topk} edges per node "
-                    f"(matches the model's own sparsification)")
-    net, title, legend = build_network(adj, tickers, sectors, target,
-                                        per_node_topk=args.per_node_topk,
-                                        title_extra=title_extra)
-
-    out = Path(args.out) if args.out else run / "figures" / "interactive_graph.html"
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    # pyvis writes the file itself; we wrap it after with our header.
-    raw_html = net.generate_html(notebook=False)
-    full_html = _wrap_with_header(raw_html, title, legend, run, date_options, args.date)
-    out.write_text(full_html, encoding="utf-8")
-
-    size_mb = out.stat().st_size / 1e6
-    print(f"wrote   {out}  ({size_mb:.1f} MB)")
-    print(f"open    file://{out.resolve()}")
-    if args.open:
-        webbrowser.open(f"file://{out.resolve()}")
+    out = generate(args.run_dir, args.out, per_node_topk=args.per_node_topk,
+                   date=args.date, open_browser=args.open)
+    if out is None:
+        raise SystemExit("no graphs to render — train first")
 
 
 if __name__ == "__main__":
